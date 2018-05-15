@@ -26,6 +26,10 @@ function mapCommasToNulls(children) {
   }, [])
 }
 
+function getSourceString(ctx) {
+  return ctx.start.getInputStream().getText(ctx.start.start, ctx.stop.stop)
+}
+
 const transformAST = {
   SourceUnit (ctx) {
     // last element is EOF terminal node
@@ -127,6 +131,34 @@ const transformAST = {
     }
   },
 
+  NatSpecComment(ctx) {
+    if (ctx.natSpecMultilineComment()) {
+      return { annotations: this.visit(ctx.natSpecMultilineComment()).annotations }
+    } else if (ctx.natSpecSingleLineComment()) {
+      const annotations = ctx.natSpecSingleLineComment()
+        .map(singleLineComment => this.visit(singleLineComment))
+        .reduce((current, next) => {
+          return Object.assign({}, current, next.annotation)
+        }, {})
+      return { annotations }
+    }
+  },
+
+  NatSpecSingleLineComment(ctx) {
+    const keyword = ctx.NatSpecStart().getText().substr(5)
+    const arr = ctx.natSpecDescription().natSpecDescriptionText()
+      .map(description => getSourceString(description))
+    return { annotation: { [keyword]: arr.join('\n') }}
+  },
+
+  NatSpecMultilineComment(ctx) {
+    const annotations = {}
+    ctx.NatSpecKeyword().forEach((key, idx) => {
+      annotations[key.getText().substr(1)] = getSourceString(ctx.natSpecDescriptionText()[idx])
+    })
+    return { annotations }
+  },
+
   FunctionDefinition (ctx) {
     let name = ''
     if (ctx.identifier(0)) {
@@ -140,6 +172,8 @@ const transformAST = {
     if (ctx.block()) {
       block = this.visit(ctx.block())
     }
+
+    const annotations = this.visit(ctx.natSpecComment())
 
     const modifiers = ctx
       .modifierList()
@@ -164,6 +198,7 @@ const transformAST = {
     }
 
     return {
+      annotations,
       name,
       parameters,
       returnParameters,
